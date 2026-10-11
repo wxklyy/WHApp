@@ -62,8 +62,6 @@ const char* inject_dylib(pid_t pid, const char* dylib_path) {
         mach_port_deallocate(mach_task_self(), task);
         return errbuf;
     }
-
-    size_t path_len = strlen(dylib_path) + 1;
     kr = mach_vm_write(task, remote_addr, (vm_offset_t)dylib_path, (mach_msg_type_number_t)path_len);
     if (kr != KERN_SUCCESS) {
         snprintf(errbuf, sizeof(errbuf), "mach_vm_write failed: %d", kr);
