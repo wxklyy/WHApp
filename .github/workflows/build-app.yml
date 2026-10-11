@@ -62,10 +62,17 @@ jobs:
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/WHApp.app
 
-          # copy dylib into app bundle so it's available at runtime
+          # clean up code signature and dSYM leftovers
+          rm -rf Payload/WHApp.app/_CodeSignature
+          rm -rf Payload/WHApp.app/*.dSYM
+
+          # copy dylib into app bundle
+          mkdir -p Payload/WHApp.app/Frameworks
           if [ -f WHApp/WHApp/StandoffWH.dylib ]; then
+            echo "Copying StandoffWH.dylib into bundle..."
+            file WHApp/WHApp/StandoffWH.dylib
             cp WHApp/WHApp/StandoffWH.dylib Payload/WHApp.app/StandoffWH.dylib
-            ldid -S Payload/WHApp.app/StandoffWH.dylib || true
+            cp WHApp/WHApp/StandoffWH.dylib Payload/WHApp.app/Frameworks/StandoffWH.dylib
           fi
 
           # sign main executable with TrollStore entitlements

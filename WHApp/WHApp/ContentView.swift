@@ -10,6 +10,10 @@ let DYLIB_PATH: String = {
     if FileManager.default.fileExists(atPath: direct) {
         return direct
     }
+    let frameworks = Bundle.main.bundlePath + "/Frameworks/StandoffWH.dylib"
+    if FileManager.default.fileExists(atPath: frameworks) {
+        return frameworks
+    }
     // fallback to MobileSubstrate path if .deb is installed
     return "/var/jb/Library/MobileSubstrate/DynamicLibraries/StandoffWH.dylib"
 }()
