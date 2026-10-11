@@ -1,20 +1,19 @@
 #ifndef BridgingHeader_h
 #define BridgingHeader_h
 
-#include <mach/mach.h>
-#include <mach/arm/thread_status.h>
-#include <sys/sysctl.h>
-#include <dlfcn.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include <spawn.h>
 
-// inject dylib into pid — returns NULL on success, error string on failure
-const char* inject_dylib(pid_t pid, const char* dylib_path);
+// Inject LC_LOAD_DYLIB directly into Mach-O binary (returns 1 on success, 0 if already hooked, negative on error)
+int patch_macho_add_dylib(const char* binary_path, const char* dylib_load_path);
 
-// find pid by process name
+// Resign binary using ldid if available
+int resign_binary(const char* binary_path);
+
+// Find running process PID by name
 pid_t find_pid(const char* name);
 
-// respring SpringBoard
+// Respring SpringBoard
 void do_respring(void);
 
 #endif

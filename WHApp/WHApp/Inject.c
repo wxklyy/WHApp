@@ -2,128 +2,134 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <unistd.h>
 #include <spawn.h>
+#include <sys/sysctl.h>
+#include <sys/wait.h>
+#include <mach-o/loader.h>
 
-// ── mach_vm_* are private on iOS — declare manually ──
-typedef uint64_t mach_vm_address_t;
-typedef uint64_t mach_vm_size_t;
-typedef uint64_t mach_vm_offset_t;
+int patch_macho_add_dylib(const char* binary_path, const char* dylib_load_path) {
+    FILE* f = fopen(binary_path, "r+b");
+    if (!f) return -1;
 
-extern kern_return_t mach_vm_allocate(
-    vm_map_t target,
-    mach_vm_address_t *address,
-    mach_vm_size_t size,
-    int flags
-);
-
-extern kern_return_t mach_vm_write(
-    vm_map_t target_task,
-    mach_vm_address_t address,
-    vm_offset_t data,
-    mach_msg_type_number_t dataCnt
-);
-
-extern kern_return_t mach_vm_protect(
-    vm_map_t target_task,
-    mach_vm_address_t address,
-    mach_vm_size_t size,
-    boolean_t set_maximum,
-    vm_prot_t new_protection
-);
-
-extern kern_return_t mach_vm_deallocate(
-    vm_map_t target,
-    mach_vm_address_t address,
-    mach_vm_size_t size
-);
-
-// ARM_THREAD_STATE64_COUNT macro is unavailable in Swift/iOS SDK — hardcode
-#define MY_ARM_THREAD_STATE64_COUNT 68
-
-const char* inject_dylib(pid_t pid, const char* dylib_path) {
-    static char errbuf[512];
-
-    // get task port — requires task_for_pid-allow (TrollStore grants this)
-    mach_port_t task = MACH_PORT_NULL;
-    kern_return_t kr = task_for_pid(mach_task_self(), pid, &task);
-    if (kr != KERN_SUCCESS) {
-        snprintf(errbuf, sizeof(errbuf), "task_for_pid failed: %d (need TrollStore entitlements)", kr);
-        return errbuf;
+    struct mach_header_64 header;
+    if (fread(&header, sizeof(header), 1, f) != 1) {
+        fclose(f);
+        return -2;
     }
 
-    size_t path_len = strlen(dylib_path) + 1;
-
-    // Allocate 32 KB (enough for dylib path, stub code, and isolated stack space)
-    mach_vm_size_t alloc_size = 0x8000;
-    mach_vm_address_t remote_addr = 0;
-    kr = mach_vm_allocate(task, &remote_addr, alloc_size, VM_FLAGS_ANYWHERE);
-    if (kr != KERN_SUCCESS) {
-        snprintf(errbuf, sizeof(errbuf), "mach_vm_allocate failed: %d", kr);
-        mach_port_deallocate(mach_task_self(), task);
-        return errbuf;
-    }
-    kr = mach_vm_write(task, remote_addr, (vm_offset_t)dylib_path, (mach_msg_type_number_t)path_len);
-    if (kr != KERN_SUCCESS) {
-        snprintf(errbuf, sizeof(errbuf), "mach_vm_write failed: %d", kr);
-        mach_vm_deallocate(task, remote_addr, alloc_size);
-        mach_port_deallocate(mach_task_self(), task);
-        return errbuf;
+    if (header.magic != MH_MAGIC_64) {
+        fclose(f);
+        return -3; // Not 64-bit Mach-O
     }
 
-    // Write a safe loop stub at offset 0x200: ARM64 "b ." instruction (0x14000000)
-    // dlopen returns to this loop instead of jumping to 0x0 and crashing the game!
-    uint32_t loop_stub = 0x14000000;
-    mach_vm_address_t stub_addr = remote_addr + 0x200;
-    mach_vm_write(task, stub_addr, (vm_offset_t)&loop_stub, sizeof(loop_stub));
+    uint64_t min_section_offset = 0;
+    bool found_existing = false;
 
-    // Allow execution on the page so the return stub can run safely
-    mach_vm_protect(task, remote_addr, alloc_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
+    // Check existing load commands
+    fseek(f, sizeof(struct mach_header_64), SEEK_SET);
+    for (uint32_t i = 0; i < header.ncmds; i++) {
+        long cmd_pos = ftell(f);
+        struct load_command lc;
+        if (fread(&lc, sizeof(lc), 1, f) != 1) break;
 
-    // dlopen address — same in both processes via shared dyld cache
-    void* dlopen_addr = dlsym(RTLD_DEFAULT, "dlopen");
-    if (!dlopen_addr) {
-        snprintf(errbuf, sizeof(errbuf), "dlsym(dlopen) failed");
-        mach_vm_deallocate(task, remote_addr, alloc_size);
-        mach_port_deallocate(mach_task_self(), task);
-        return errbuf;
+        if (lc.cmd == LC_LOAD_DYLIB || lc.cmd == LC_LOAD_WEAK_DYLIB) {
+            fseek(f, cmd_pos, SEEK_SET);
+            struct dylib_command dc;
+            if (fread(&dc, sizeof(dc), 1, f) == 1) {
+                char name_buf[512] = {0};
+                fseek(f, cmd_pos + dc.dylib.name.offset, SEEK_SET);
+                fread(name_buf, 1, sizeof(name_buf) - 1, f);
+                if (strstr(name_buf, "StandoffWH.dylib")) {
+                    found_existing = true;
+                }
+            }
+        }
+
+        if (lc.cmd == LC_SEGMENT_64) {
+            fseek(f, cmd_pos, SEEK_SET);
+            struct segment_command_64 seg;
+            if (fread(&seg, sizeof(seg), 1, f) == 1) {
+                for (uint32_t s = 0; s < seg.nsects; s++) {
+                    struct section_64 sect;
+                    if (fread(&sect, sizeof(sect), 1, f) == 1) {
+                        if (sect.offset > 0 && (min_section_offset == 0 || sect.offset < min_section_offset)) {
+                            min_section_offset = sect.offset;
+                        }
+                    }
+                }
+            }
+        }
+
+        fseek(f, cmd_pos + lc.cmdsize, SEEK_SET);
     }
 
-    // set up arm64 thread state
-    arm_thread_state64_t state;
-    memset(&state, 0, sizeof(state));
-    state.__x[0] = (uint64_t)remote_addr;                         // arg0: path
-    state.__x[1] = (uint64_t)RTLD_NOW;                            // arg1: mode
-    state.__pc   = (uint64_t)(uintptr_t)dlopen_addr;
-    state.__lr   = (uint64_t)stub_addr;                           // return address points to loop stub, NEVER 0!
-    state.__sp   = (uint64_t)(remote_addr + alloc_size - 0x40);   // top of mapped stack, 16-byte aligned
-
-    // spawn remote thread at dlopen — this loads our dylib
-    thread_act_t remote_thread = 0;
-    kr = thread_create_running(
-        task,
-        ARM_THREAD_STATE64,
-        (thread_state_t)&state,
-        MY_ARM_THREAD_STATE64_COUNT,
-        &remote_thread
-    );
-
-    if (kr != KERN_SUCCESS) {
-        snprintf(errbuf, sizeof(errbuf), "thread_create_running failed: %d", kr);
-        mach_vm_deallocate(task, remote_addr, alloc_size);
-        mach_port_deallocate(mach_task_self(), task);
-        return errbuf;
+    if (found_existing) {
+        fclose(f);
+        return 0; // Already injected
     }
 
-    // wait for dlopen to finish loading and running %ctor
-    usleep(500000); // 500ms
+    // 8-byte aligned size
+    size_t str_len = strlen(dylib_load_path) + 1;
+    uint32_t cmdsize = (uint32_t)(sizeof(struct dylib_command) + str_len);
+    cmdsize = (cmdsize + 7) & ~7;
 
-    // cleanup
-    thread_terminate(remote_thread);
-    mach_port_deallocate(mach_task_self(), remote_thread);
-    mach_vm_deallocate(task, remote_addr, alloc_size);
-    mach_port_deallocate(mach_task_self(), task);
+    long end_of_cmds = sizeof(struct mach_header_64) + header.sizeofcmds;
 
-    return NULL; // success
+    if (min_section_offset > 0 && (end_of_cmds + cmdsize > min_section_offset)) {
+        fclose(f);
+        return -4; // Not enough header padding
+    }
+
+    struct dylib_command dc;
+    memset(&dc, 0, sizeof(dc));
+    dc.cmd = LC_LOAD_DYLIB;
+    dc.cmdsize = cmdsize;
+    dc.dylib.name.offset = sizeof(struct dylib_command);
+    dc.dylib.timestamp = 2;
+    dc.dylib.current_version = 0x00010000;
+    dc.dylib.compatibility_version = 0x00010000;
+
+    fseek(f, end_of_cmds, SEEK_SET);
+    fwrite(&dc, sizeof(dc), 1, f);
+    fwrite(dylib_load_path, str_len, 1, f);
+    size_t pad = cmdsize - (sizeof(struct dylib_command) + str_len);
+    if (pad > 0) {
+        char pad_zeros[8] = {0};
+        fwrite(pad_zeros, 1, pad, f);
+    }
+
+    header.ncmds += 1;
+    header.sizeofcmds += cmdsize;
+    fseek(f, 0, SEEK_SET);
+    fwrite(&header, sizeof(header), 1, f);
+
+    fclose(f);
+    return 1; // Injected!
+}
+
+int resign_binary(const char* binary_path) {
+    const char* ldid_candidates[] = {
+        "/var/jb/usr/bin/ldid",
+        "/usr/bin/ldid",
+        "/var/jb/bin/ldid",
+        "/usr/local/bin/ldid",
+        NULL
+    };
+
+    for (int i = 0; ldid_candidates[i]; i++) {
+        if (access(ldid_candidates[i], X_OK) == 0) {
+            pid_t pid;
+            const char* args[] = { ldid_candidates[i], "-s", binary_path, NULL };
+            int status = 0;
+            if (posix_spawn(&pid, ldid_candidates[i], NULL, NULL, (char* const*)args, NULL) == 0) {
+                waitpid(pid, &status, 0);
+                return WEXITSTATUS(status);
+            }
+        }
+    }
+    return 0;
 }
 
 pid_t find_pid(const char* name) {
