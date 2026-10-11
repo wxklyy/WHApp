@@ -7,8 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA000001 /* WHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011 /* WHApp.swift */; };
-		AA000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000012 /* ContentView.swift */; };
+		AA000001 /* WHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011; };
+		AA000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000012; };
+		AA000003 /* Inject.c in Sources */ = {isa = PBXBuildFile; fileRef = AA000015; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +18,8 @@
 		AA000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000014 /* Entitlements.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Entitlements.plist; sourceTree = "<group>"; };
+		AA000015 /* Inject.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = Inject.c; sourceTree = "<group>"; };
+		AA000016 /* WHApp-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "WHApp-Bridging-Header.h"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -43,6 +46,8 @@
 			children = (
 				AA000011 /* WHApp.swift */,
 				AA000012 /* ContentView.swift */,
+				AA000015 /* Inject.c */,
+				AA000016 /* WHApp-Bridging-Header.h */,
 				AA000013 /* Info.plist */,
 				AA000014 /* Entitlements.plist */,
 			);
@@ -68,10 +73,8 @@
 				AA000030 /* Frameworks */,
 				AA000032 /* Resources */,
 			);
-			buildRules = (
-			);
-			dependencies = (
-			);
+			buildRules = ();
+			dependencies = ();
 			name = WHApp;
 			productName = WHApp;
 			productReference = AA000010 /* WHApp.app */;
@@ -91,17 +94,12 @@
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (
-				en,
-				Base,
-			);
+			knownRegions = (en, Base);
 			mainGroup = AA000040;
-			productRefGroup = AA000042 /* Products */;
+			productRefGroup = AA000042;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (
-				AA000050 /* WHApp */,
-			);
+			targets = (AA000050);
 		};
 /* End PBXProject section */
 
@@ -109,8 +107,7 @@
 		AA000032 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (
-			);
+			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -122,6 +119,7 @@
 			files = (
 				AA000001 /* WHApp.swift in Sources */,
 				AA000002 /* ContentView.swift in Sources */,
+				AA000003 /* Inject.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -132,23 +130,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				INFOPLIST_FILE = WHApp/Info.plist;
 				CODE_SIGN_ENTITLEMENTS = WHApp/Entitlements.plist;
+				SWIFT_OBJC_BRIDGING_HEADER = "WHApp/WHApp-Bridging-Header.h";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -157,8 +149,9 @@
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
-				PRODUCT_BUNDLE_IDENTIFIER = com.onyx.whapp;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.onyx.whapp";
 				PRODUCT_NAME = WHApp;
+				OTHER_LDFLAGS = "";
 			};
 			name = Release;
 		};
@@ -172,24 +165,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA000060 /* Build configuration list for PBXNativeTarget "WHApp" */ = {
+		AA000060 = {
 			isa = XCConfigurationList;
-			buildConfigurations = (
-				AA000061 /* Release */,
-			);
+			buildConfigurations = (AA000061);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA000071 /* Build configuration list for PBXProject "WHApp" */ = {
+		AA000071 = {
 			isa = XCConfigurationList;
-			buildConfigurations = (
-				AA000072 /* Release */,
-			);
+			buildConfigurations = (AA000072);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 
 	};
-	rootObject = AA000070 /* Project object */;
+	rootObject = AA000070;
 }

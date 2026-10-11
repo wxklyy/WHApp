@@ -1,119 +1,11 @@
 import SwiftUI
-import Darwin
 
-// ══════════════════════════════════════
-// Mach inject core
-// ══════════════════════════════════════
-
-// private entitlements granted by TrollStore:
-// task_for_pid-allow, platform-application, get-task-allow
-
-typealias MachPort = mach_port_t
-
-func injectDylib(pid: pid_t, dylibPath: String) -> String {
-    var task: MachPort = 0
-
-    // get task port — works because TrollStore grants task_for_pid-allow
-    let kr = task_for_pid(mach_task_self_, pid, &task)
-    guard kr == KERN_SUCCESS else {
-        return "task_for_pid failed: \(kr) — make sure TrollStore granted entitlements"
-    }
-
-    // allocate memory in target process for the dylib path string
-    let pathBytes = Array(dylibPath.utf8) + [0]
-    let pathSize = pathBytes.count
-
-    var remoteAddr: mach_vm_address_t = 0
-    var kr2 = mach_vm_allocate(task, &remoteAddr, mach_vm_size_t(pathSize), Int32(VM_FLAGS_ANYWHERE))
-    guard kr2 == KERN_SUCCESS else {
-        return "mach_vm_allocate failed: \(kr2)"
-    }
-
-    // write dylib path into target process memory
-    var kr3 = pathBytes.withUnsafeBytes { ptr in
-        mach_vm_write(task, remoteAddr, vm_offset_t(bitPattern: ptr.baseAddress), mach_msg_type_number_t(pathSize))
-    }
-    guard kr3 == KERN_SUCCESS else {
-        return "mach_vm_write failed: \(kr3)"
-    }
-
-    // set memory protection to rx
-    _ = mach_vm_protect(task, remoteAddr, mach_vm_size_t(pathSize), 0, VM_PROT_READ | VM_PROT_WRITE)
-
-    // get dlopen address from our process (same dyld in target)
-    guard let dlopenAddr = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "dlopen") else {
-        return "dlsym(dlopen) failed"
-    }
-
-    // create remote thread at dlopen with our path as argument
-    // arm64 thread state
-    var state = arm_thread_state64_t()
-    var stateCount = mach_msg_type_number_t(ARM_THREAD_STATE64_COUNT)
-
-    // set PC = dlopen, x0 = remoteAddr (path), x1 = RTLD_NOW
-    withUnsafeMutableBytes(of: &state.__x) { ptr in
-        // x0 = path pointer
-        ptr.storeBytes(of: remoteAddr, toByteOffset: 0, as: UInt64.self)
-        // x1 = RTLD_NOW (2)
-        ptr.storeBytes(of: UInt64(RTLD_NOW), toByteOffset: 8, as: UInt64.self)
-    }
-    state.__pc = UInt64(UInt(bitPattern: dlopenAddr))
-    // set sp to some stack area
-    state.__sp = remoteAddr + mach_vm_address_t(0x1000)
-
-    var remoteThread: thread_act_t = 0
-    let kr4 = withUnsafeMutablePointer(to: &state) { statePtr in
-        statePtr.withMemoryRebound(to: UInt32.self, capacity: Int(ARM_THREAD_STATE64_COUNT)) { rawState in
-            thread_create_running(task, ARM_THREAD_STATE64, rawState, ARM_THREAD_STATE64_COUNT, &remoteThread)
-        }
-    }
-
-    guard kr4 == KERN_SUCCESS else {
-        return "thread_create_running failed: \(kr4)"
-    }
-
-    // wait a bit for dlopen to complete
-    Thread.sleep(forTimeInterval: 0.5)
-    thread_terminate(remoteThread)
-    mach_port_deallocate(mach_task_self_, task)
-
-    return "OK"
-}
-
-// ══════════════════════════════════════
-// PID finder
-// ══════════════════════════════════════
-
-func findPID(name: String) -> pid_t {
-    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-    var size = 0
-    sysctl(&mib, 4, nil, &size, nil, 0)
-
-    let count = size / MemoryLayout<kinfo_proc>.stride
-    var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
-    sysctl(&mib, 4, &procs, &size, nil, 0)
-
-    for var p in procs {
-        let n = withUnsafeBytes(of: &p.kp_proc.p_comm) {
-            String(bytes: $0.prefix(while: { $0 != 0 }), encoding: .utf8) ?? ""
-        }
-        if n.lowercased().contains(name.lowercased()) {
-            return p.kp_proc.p_pid
-        }
-    }
-    return 0
-}
-
-// ══════════════════════════════════════
-// UI
-// ══════════════════════════════════════
+let DYLIB_PATH = "/var/jb/Library/MobileSubstrate/DynamicLibraries/StandoffWH.dylib"
 
 struct ContentView: View {
     @State private var log: [LogLine] = []
     @State private var injected = false
     @State private var pid: pid_t = 0
-
-    let dylibPath = "/var/jb/Library/MobileSubstrate/DynamicLibraries/StandoffWH.dylib"
 
     struct LogLine: Identifiable {
         let id = UUID()
@@ -190,10 +82,10 @@ struct ContentView: View {
                 .padding(.bottom, 16)
 
                 // ── respring ──
-                Button("Respring SpringBoard") {
-                    addLog("Respringing...", .gray)
+                Button("Respring") {
+                    addLog("[*] Respringing...", .gray)
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
-                        _ = Foundation.Process.run(URL(fileURLWithPath: "/var/jb/usr/bin/sbreload"), arguments: [])
+                        system("/var/jb/usr/bin/sbreload")
                     }
                 }
                 .font(.system(size: 12, design: .monospaced))
@@ -206,24 +98,24 @@ struct ContentView: View {
 
     func scanProcess() {
         addLog("[*] Scanning for Standoff 2...", .cyan)
-        let p = findPID(name: "standoff2")
+
+        let p = find_pid("standoff2")
         if p > 0 {
             pid = p
             addLog("[+] Found: PID \(p)", .green)
         } else {
-            addLog("[-] Not running. Launch the game first.", .red)
+            addLog("[-] Not running — launch game first", .red)
         }
 
-        // check dylib
-        if FileManager.default.fileExists(atPath: dylibPath) {
-            addLog("[+] Dylib found at \(dylibPath)", .green)
+        if FileManager.default.fileExists(atPath: DYLIB_PATH) {
+            addLog("[+] Dylib OK: \(DYLIB_PATH)", .green)
         } else {
-            addLog("[!] Dylib NOT found — install tweak .deb first", .orange)
+            addLog("[!] Dylib missing — install .deb first", .orange)
         }
     }
 
     func doInject() {
-        let p = findPID(name: "standoff2")
+        let p = find_pid("standoff2")
         guard p > 0 else {
             addLog("[-] Standoff 2 not running!", .red)
             return
@@ -232,15 +124,16 @@ struct ContentView: View {
         addLog("[*] Injecting into PID \(p)...", .yellow)
 
         DispatchQueue.global().async {
-            let result = injectDylib(pid: p, dylibPath: dylibPath)
+            let err = inject_dylib(p, DYLIB_PATH)
             DispatchQueue.main.async {
-                if result == "OK" {
+                if err == nil {
                     injected = true
-                    addLog("[+] Injected successfully!", .green)
+                    addLog("[+] Injected!", .green)
                     addLog("[*] Switch to Standoff 2", .cyan)
-                    addLog("[*] Menu appears in ~2 sec", .cyan)
+                    addLog("[*] WH menu appears in ~2s", .cyan)
                 } else {
-                    addLog("[!] \(result)", .red)
+                    let msg = String(cString: err!)
+                    addLog("[!] \(msg)", .red)
                 }
             }
         }
