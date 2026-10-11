@@ -15,6 +15,29 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
 
+      - name: Install Theos
+        run: |
+          brew install dpkg ldid make
+          export THEOS=$HOME/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          curl -sL https://github.com/theos/sdks/archive/master.tar.gz | tar xz -C $THEOS/sdks --strip-components=1
+
+      - name: Build StandoffWH.dylib
+        run: |
+          # clone tweak repo and build just the dylib
+          git clone https://github.com/wxklyy/StandoffWH.git /tmp/StandoffWH
+          cd /tmp/StandoffWH
+
+          export THEOS=$HOME/theos
+          export PATH=$THEOS/bin:$PATH
+
+          make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+          # find the compiled dylib
+          DYLIB=$(find .theos -name "StandoffWH.dylib" | head -1)
+          echo "Dylib: $DYLIB"
+          cp "$DYLIB" $GITHUB_WORKSPACE/WHApp/WHApp/StandoffWH.dylib
+
       - name: Build WHApp (unsigned)
         run: |
           xcodebuild \
@@ -33,14 +56,17 @@ jobs:
       - name: Package as .tipa
         run: |
           APP_PATH=$(find build -name "WHApp.app" -maxdepth 2 | head -1)
-          echo "Found app at: $APP_PATH"
+          echo "App: $APP_PATH"
 
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/WHApp.app
 
-          # sign with ldid + entitlements
-          brew install ldid
+          # copy dylib into app bundle so it's available at runtime
+          cp WHApp/WHApp/StandoffWH.dylib Payload/WHApp.app/StandoffWH.dylib
+
+          # sign everything with ldid
           ldid -SWHApp/WHApp/Entitlements.plist Payload/WHApp.app/WHApp
+          ldid -S Payload/WHApp.app/StandoffWH.dylib
 
           zip -r WHApp.ipa Payload
           mv WHApp.ipa WHApp.tipa

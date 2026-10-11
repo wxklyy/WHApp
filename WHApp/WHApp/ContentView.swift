@@ -1,7 +1,19 @@
 import SwiftUI
 
-let DYLIB_PATH = "/var/jb/Library/MobileSubstrate/DynamicLibraries/StandoffWH.dylib"
-let TARGET_PROCESS = "StandRiseRE"  // new build exe name
+// dylib bundled inside WHApp.app itself — no .deb needed
+let DYLIB_PATH: String = {
+    // look for dylib in app bundle resources or root
+    if let path = Bundle.main.path(forResource: "StandoffWH", ofType: "dylib") {
+        return path
+    }
+    let direct = Bundle.main.bundlePath + "/StandoffWH.dylib"
+    if FileManager.default.fileExists(atPath: direct) {
+        return direct
+    }
+    // fallback to MobileSubstrate path if .deb is installed
+    return "/var/jb/Library/MobileSubstrate/DynamicLibraries/StandoffWH.dylib"
+}()
+let TARGET_PROCESS = "StandRiseRE"
 
 struct ContentView: View {
     @State private var log: [LogLine] = []
@@ -109,9 +121,10 @@ struct ContentView: View {
         }
 
         if FileManager.default.fileExists(atPath: DYLIB_PATH) {
-            addLog("[+] Dylib OK", .green)
+            let src = DYLIB_PATH.contains(".app") ? "bundled" : "deb"
+            addLog("[+] Dylib OK (\(src))", .green)
         } else {
-            addLog("[!] Dylib missing — install .deb first", .orange)
+            addLog("[!] Dylib missing from bundle", .orange)
         }
     }
 
