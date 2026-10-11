@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <spawn.h>
 
 // ── mach_vm_* are private on iOS — declare manually ──
 typedef uint64_t mach_vm_address_t;
@@ -141,4 +142,10 @@ pid_t find_pid(const char* name) {
 
     free(procs);
     return result;
+}
+
+void do_respring(void) {
+    pid_t pid;
+    const char* args[] = { "/var/jb/usr/bin/sbreload", NULL };
+    posix_spawn(&pid, "/var/jb/usr/bin/sbreload", NULL, NULL, (char* const*)args, NULL);
 }

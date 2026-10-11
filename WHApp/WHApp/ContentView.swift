@@ -85,7 +85,7 @@ struct ContentView: View {
                 Button("Respring") {
                     addLog("[*] Respringing...", .gray)
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
-                        system("/var/jb/usr/bin/sbreload")
+                        do_respring()
                     }
                 }
                 .font(.system(size: 12, design: .monospaced))

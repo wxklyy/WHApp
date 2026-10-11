@@ -6,11 +6,15 @@
 #include <sys/sysctl.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <spawn.h>
 
 // inject dylib into pid — returns NULL on success, error string on failure
 const char* inject_dylib(pid_t pid, const char* dylib_path);
 
 // find pid by process name
 pid_t find_pid(const char* name);
+
+// respring SpringBoard
+void do_respring(void);
 
 #endif
