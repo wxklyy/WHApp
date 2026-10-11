@@ -17,10 +17,8 @@ jobs:
 
       - name: Build WHApp (unsigned)
         run: |
-          cd injector/WHApp
-
           xcodebuild \
-            -project WHApp.xcodeproj \
+            -project WHApp/WHApp.xcodeproj \
             -scheme WHApp \
             -configuration Release \
             -sdk iphoneos \
@@ -29,30 +27,26 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PRODUCT_BUNDLE_IDENTIFIER=com.onyx.whapp \
-            BUILD_DIR=./build \
+            CONFIGURATION_BUILD_DIR=$PWD/build \
             build
 
-      - name: Package as .ipa and sign with ldid
+      - name: Package as .tipa
         run: |
-          cd injector/WHApp
-          APP_PATH=$(find build -name "WHApp.app" | head -1)
-          echo "App path: $APP_PATH"
+          APP_PATH=$(find build -name "WHApp.app" -maxdepth 2 | head -1)
+          echo "Found app at: $APP_PATH"
 
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/WHApp.app
 
-          # sign with ldid using our entitlements
+          # sign with ldid + entitlements
           brew install ldid
-          ldid -SWHApp/Entitlements.plist Payload/WHApp.app/WHApp
+          ldid -SWHApp/WHApp/Entitlements.plist Payload/WHApp.app/WHApp
 
-          # pack as ipa
           zip -r WHApp.ipa Payload
+          mv WHApp.ipa WHApp.tipa
 
-          # rename to .tipa for TrollStore
-          cp WHApp.ipa WHApp.tipa
-
-          mkdir -p ../../output
-          cp WHApp.tipa ../../output/
+          mkdir -p output
+          cp WHApp.tipa output/
 
       - name: Upload TIPA
         uses: actions/upload-artifact@v4
