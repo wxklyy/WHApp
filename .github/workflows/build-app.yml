@@ -33,9 +33,10 @@ jobs:
 
           make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
 
-          # find the compiled dylib
-          DYLIB=$(find .theos -name "StandoffWH.dylib" | head -1)
-          echo "Dylib: $DYLIB"
+          # find the compiled dylib (exclude .dSYM debug symbols!)
+          DYLIB=$(find .theos -type f -name "StandoffWH.dylib" ! -path "*.dSYM*" | head -1)
+          echo "Selected Dylib: $DYLIB"
+          file "$DYLIB"
           cp "$DYLIB" $GITHUB_WORKSPACE/WHApp/WHApp/StandoffWH.dylib
 
       - name: Build WHApp (unsigned)
