@@ -53,40 +53,51 @@ const char* inject_dylib(pid_t pid, const char* dylib_path) {
 
     size_t path_len = strlen(dylib_path) + 1;
 
-    // allocate memory in target process for dylib path
+    // Allocate 32 KB (enough for dylib path, stub code, and isolated stack space)
+    mach_vm_size_t alloc_size = 0x8000;
     mach_vm_address_t remote_addr = 0;
-    kr = mach_vm_allocate(task, &remote_addr, (mach_vm_size_t)path_len, VM_FLAGS_ANYWHERE);
+    kr = mach_vm_allocate(task, &remote_addr, alloc_size, VM_FLAGS_ANYWHERE);
     if (kr != KERN_SUCCESS) {
         snprintf(errbuf, sizeof(errbuf), "mach_vm_allocate failed: %d", kr);
         mach_port_deallocate(mach_task_self(), task);
         return errbuf;
     }
 
-    // write dylib path string into target process
+    size_t path_len = strlen(dylib_path) + 1;
     kr = mach_vm_write(task, remote_addr, (vm_offset_t)dylib_path, (mach_msg_type_number_t)path_len);
     if (kr != KERN_SUCCESS) {
         snprintf(errbuf, sizeof(errbuf), "mach_vm_write failed: %d", kr);
-        mach_vm_deallocate(task, remote_addr, path_len);
+        mach_vm_deallocate(task, remote_addr, alloc_size);
         mach_port_deallocate(mach_task_self(), task);
         return errbuf;
     }
 
-    mach_vm_protect(task, remote_addr, (mach_vm_size_t)path_len, 0, VM_PROT_READ | VM_PROT_WRITE);
+    // Write a safe loop stub at offset 0x200: ARM64 "b ." instruction (0x14000000)
+    // dlopen returns to this loop instead of jumping to 0x0 and crashing the game!
+    uint32_t loop_stub = 0x14000000;
+    mach_vm_address_t stub_addr = remote_addr + 0x200;
+    mach_vm_write(task, stub_addr, (vm_offset_t)&loop_stub, sizeof(loop_stub));
+
+    // Allow execution on the page so the return stub can run safely
+    mach_vm_protect(task, remote_addr, alloc_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
 
     // dlopen address — same in both processes via shared dyld cache
     void* dlopen_addr = dlsym(RTLD_DEFAULT, "dlopen");
     if (!dlopen_addr) {
         snprintf(errbuf, sizeof(errbuf), "dlsym(dlopen) failed");
+        mach_vm_deallocate(task, remote_addr, alloc_size);
+        mach_port_deallocate(mach_task_self(), task);
         return errbuf;
     }
 
-    // set up arm64 thread state to call dlopen(path, RTLD_NOW)
+    // set up arm64 thread state
     arm_thread_state64_t state;
     memset(&state, 0, sizeof(state));
-    state.__x[0] = (uint64_t)remote_addr; // arg0: path
-    state.__x[1] = (uint64_t)RTLD_NOW;    // arg1: mode
+    state.__x[0] = (uint64_t)remote_addr;                         // arg0: path
+    state.__x[1] = (uint64_t)RTLD_NOW;                            // arg1: mode
     state.__pc   = (uint64_t)(uintptr_t)dlopen_addr;
-    state.__sp   = remote_addr + 0x4000;  // scratch stack above path
+    state.__lr   = (uint64_t)stub_addr;                           // return address points to loop stub, NEVER 0!
+    state.__sp   = (uint64_t)(remote_addr + alloc_size - 0x40);   // top of mapped stack, 16-byte aligned
 
     // spawn remote thread at dlopen — this loads our dylib
     thread_act_t remote_thread = 0;
@@ -100,18 +111,18 @@ const char* inject_dylib(pid_t pid, const char* dylib_path) {
 
     if (kr != KERN_SUCCESS) {
         snprintf(errbuf, sizeof(errbuf), "thread_create_running failed: %d", kr);
-        mach_vm_deallocate(task, remote_addr, path_len);
+        mach_vm_deallocate(task, remote_addr, alloc_size);
         mach_port_deallocate(mach_task_self(), task);
         return errbuf;
     }
 
-    // wait for dlopen to finish in remote process
-    usleep(800000); // 800ms
+    // wait for dlopen to finish loading and running %ctor
+    usleep(500000); // 500ms
 
     // cleanup
     thread_terminate(remote_thread);
     mach_port_deallocate(mach_task_self(), remote_thread);
-    mach_vm_deallocate(task, remote_addr, path_len);
+    mach_vm_deallocate(task, remote_addr, alloc_size);
     mach_port_deallocate(mach_task_self(), task);
 
     return NULL; // success
