@@ -1,6 +1,7 @@
 import SwiftUI
 
 let DYLIB_PATH = "/var/jb/Library/MobileSubstrate/DynamicLibraries/StandoffWH.dylib"
+let TARGET_PROCESS = "StandRiseRE"  // new build exe name
 
 struct ContentView: View {
     @State private var log: [LogLine] = []
@@ -97,9 +98,9 @@ struct ContentView: View {
     }
 
     func scanProcess() {
-        addLog("[*] Scanning for Standoff 2...", .cyan)
+        addLog("[*] Scanning for \(TARGET_PROCESS)...", .cyan)
 
-        let p = find_pid("standoff2")
+        let p = find_pid(TARGET_PROCESS)
         if p > 0 {
             pid = p
             addLog("[+] Found: PID \(p)", .green)
@@ -108,16 +109,16 @@ struct ContentView: View {
         }
 
         if FileManager.default.fileExists(atPath: DYLIB_PATH) {
-            addLog("[+] Dylib OK: \(DYLIB_PATH)", .green)
+            addLog("[+] Dylib OK", .green)
         } else {
             addLog("[!] Dylib missing — install .deb first", .orange)
         }
     }
 
     func doInject() {
-        let p = find_pid("standoff2")
+        let p = find_pid(TARGET_PROCESS)
         guard p > 0 else {
-            addLog("[-] Standoff 2 not running!", .red)
+            addLog("[-] \(TARGET_PROCESS) not running!", .red)
             return
         }
         pid = p
