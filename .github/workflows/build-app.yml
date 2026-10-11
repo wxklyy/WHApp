@@ -17,7 +17,7 @@ jobs:
 
       - name: Install Theos
         run: |
-          brew install dpkg ldid make
+          brew install dpkg make ldid-procursus
           export THEOS=$HOME/theos
           git clone --recursive https://github.com/theos/theos.git $THEOS
           curl -sL https://github.com/theos/sdks/archive/master.tar.gz | tar xz -C $THEOS/sdks --strip-components=1
@@ -51,6 +51,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             PRODUCT_BUNDLE_IDENTIFIER=com.onyx.whapp \
             CONFIGURATION_BUILD_DIR=$PWD/build \
+            OTHER_LDFLAGS="-Wl,-ld_classic" \
             build
 
       - name: Package as .tipa
@@ -62,11 +63,13 @@ jobs:
           cp -r "$APP_PATH" Payload/WHApp.app
 
           # copy dylib into app bundle so it's available at runtime
-          cp WHApp/WHApp/StandoffWH.dylib Payload/WHApp.app/StandoffWH.dylib
+          if [ -f WHApp/WHApp/StandoffWH.dylib ]; then
+            cp WHApp/WHApp/StandoffWH.dylib Payload/WHApp.app/StandoffWH.dylib
+            ldid -S Payload/WHApp.app/StandoffWH.dylib || true
+          fi
 
-          # sign everything with ldid
+          # sign main executable with TrollStore entitlements
           ldid -SWHApp/WHApp/Entitlements.plist Payload/WHApp.app/WHApp
-          ldid -S Payload/WHApp.app/StandoffWH.dylib
 
           zip -r WHApp.ipa Payload
           mv WHApp.ipa WHApp.tipa
